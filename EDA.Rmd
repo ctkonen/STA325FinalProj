@@ -5,6 +5,16 @@ date: "2025-11-29"
 output: pdf_document
 ---
 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  warning = FALSE,   # suppress warnings
+  message = FALSE,   # suppress messages
+  echo = FALSE       # hide code if desired
+)
+```
+
+
 ```{r}
 #| label: libraries
 
@@ -15,7 +25,8 @@ library(tidyverse)
 
 ```{r}
 #| label: load-data
-brain <- read.csv("~/Downloads/Brain_GSE50161.csv")
+
+brain <- readRDS("data/brain.rds")
 ```
 
 ```{r}
@@ -48,7 +59,10 @@ gene_summary <- data.frame(
   Max = gene_max
 )
 head(gene_summary)
+```
 
+```{r}
+#| label: histogram-mean
 # histograms
 # gene means
 hist(gene_means,
@@ -57,7 +71,10 @@ hist(gene_means,
      xlab = "Mean Expression",
      col = "lightblue",
      border = "white")
+```
 
+```{r}
+#| label: histogram-median
 # gene medians
 hist(gene_medians,
      breaks = 50,
@@ -65,7 +82,10 @@ hist(gene_medians,
      xlab = "Median Expression",
      col = "lightgreen",
      border = "white")
-     
+```
+
+```{r}
+#| label: histogram-sd   
 # standard deviations
 hist(gene_sd,
      breaks = 50,
@@ -73,7 +93,10 @@ hist(gene_sd,
      xlab = "SD",
      col = "lightpink",
      border = "white")
+```
 
+```{r}
+#| label: top20-hvg
 # boxplot of top 20 most variable genes
 # Top 20 most variable genes
 top_genes <- names(sort(gene_sd, decreasing = TRUE))[1:20]
@@ -87,7 +110,10 @@ boxplot(brain[top_genes],
         cex.axis = 0.7 # shrink label text
 )
 par(mar = c(5, 4, 4, 2) + 0.1)  # reset margins
+```
 
+```{r}
+#| label: scatterplot
 # scatterplot of gene mean vs sd
 plot(gene_means, gene_sd,
      xlab = "Mean Expression",
