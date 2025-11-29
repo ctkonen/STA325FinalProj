@@ -1,0 +1,98 @@
+---
+title: "EDA"
+author: "Anna Corcoran, Charlie Konen, Ethan Shang, Kethan Poduri, Daniel Cohen"
+date: "2025-11-29"
+output: pdf_document
+---
+
+```{r}
+#| label: libraries
+
+library(ggplot2)
+library(dplyr)
+library(tidyverse)
+```
+
+```{r}
+#| label: load-data
+brain <- read.csv("~/Downloads/Brain_GSE50161.csv")
+```
+
+```{r}
+#| label: EDA
+genes <- setdiff(names(brain), c("type", "samples"))
+
+# means
+gene_means <- sapply(brain[genes], mean, na.rm = TRUE)
+
+# medians
+gene_medians <- sapply(brain[genes], median, na.rm = TRUE)
+
+# standard deviation
+gene_sd <- sapply(brain[genes], sd, na.rm = TRUE)
+
+# min
+gene_min <- sapply(brain[genes], min, na.rm = TRUE)
+
+# max
+gene_max <- sapply(brain[genes], max, na.rm = TRUE)
+
+
+# summary data frame
+gene_summary <- data.frame(
+  Gene = names(gene_means),
+  Mean = gene_means,
+  Median = gene_medians,
+  SD = gene_sd,
+  Min = gene_min,
+  Max = gene_max
+)
+head(gene_summary)
+
+# histograms
+# gene means
+hist(gene_means,
+     breaks = 50,
+     main = "Distribution of Gene Means",
+     xlab = "Mean Expression",
+     col = "lightblue",
+     border = "white")
+
+# gene medians
+hist(gene_medians,
+     breaks = 50,
+     main = "Distribution of Gene Medians",
+     xlab = "Median Expression",
+     col = "lightgreen",
+     border = "white")
+     
+# standard deviations
+hist(gene_sd,
+     breaks = 50,
+     main = "Distribution of Gene Standard Deviations",
+     xlab = "SD",
+     col = "lightpink",
+     border = "white")
+
+# boxplot of top 20 most variable genes
+# Top 20 most variable genes
+top_genes <- names(sort(gene_sd, decreasing = TRUE))[1:20]
+
+# Make a bigger plotting window first (optional)
+par(mar = c(10, 4, 4, 2) + 0.1)  # bottom margin larger to fit labels
+boxplot(brain[top_genes], 
+        main = "Top 20 Most Variable Genes", 
+        las = 2,       # rotate labels to vertical
+        col = "lightcoral",
+        cex.axis = 0.7 # shrink label text
+)
+par(mar = c(5, 4, 4, 2) + 0.1)  # reset margins
+
+# scatterplot of gene mean vs sd
+plot(gene_means, gene_sd,
+     xlab = "Mean Expression",
+     ylab = "Standard Deviation",
+     main = "Gene Mean vs SD",
+     pch = 19, col = rgb(0,0,1,0.5))
+```
+
