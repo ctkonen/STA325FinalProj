@@ -27,6 +27,7 @@ library(tidyverse)
 #| label: load-data
 
 brain <- readRDS("data/brain.rds")
+
 ```
 
 ```{r}
@@ -38,7 +39,7 @@ gene_means <- sapply(brain[genes], mean, na.rm = TRUE)
 
 # medians
 gene_medians <- sapply(brain[genes], median, na.rm = TRUE)
-
+print 
 # standard deviation
 gene_sd <- sapply(brain[genes], sd, na.rm = TRUE)
 
@@ -58,7 +59,7 @@ gene_summary <- data.frame(
   Min = gene_min,
   Max = gene_max
 )
-head(gene_summary)
+print(gene_summary)
 ```
 
 ```{r}
@@ -120,5 +121,56 @@ plot(gene_means, gene_sd,
      ylab = "Standard Deviation",
      main = "Gene Mean vs SD",
      pch = 19, col = rgb(0,0,1,0.5))
+```
+```{r}
+brain %>%
+  count(type) %>%
+  ggplot(aes(x = type, y = n, fill = type)) +
+  geom_col() +
+  labs(title = "Sample Counts per Class",
+       x = "Brain Tissue Type",
+       y = "Count") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+```{r}
+
+top5000 <- names(sort(gene_sd, decreasing = TRUE))[1:5000]
+pca_res <- prcomp(brain[, top5000], scale. = TRUE)
+pca_df <- data.frame(
+  PC1 = pca_res$x[,1],
+  PC2 = pca_res$x[,2],
+  PC3 = pca_res$x[,3],
+  type = brain$type
+)
+
+ggplot(pca_df, aes(x = PC1, y = PC2, color = type)) +
+  geom_point(size = 3, alpha = 0.7) +
+  labs(title = "PCA of Brain Gene Expression (Top 5,000 Variable Genes)") +
+  theme_minimal()
+
+```
+
+```{r}
+overall_summary <- data.frame(
+  Metric = c("Mean of Means", "Median of Means", "Mean SD", "Median SD"),
+  Value = c(mean(gene_means), median(gene_means),
+            mean(gene_sd), median(gene_sd))
+)
+overall_summary
+
+plot(gene_means, gene_sd,
+     xlab = "Mean Expression",
+     ylab = "Standard Deviation",
+     main = "Gene Mean vs SD",
+     pch = 19, col = rgb(0,0,1,0.3))
+
+
+top20_ids <- names(sort(gene_sd, decreasing = TRUE))[1:20]
+points(gene_means[top20_ids], gene_sd[top20_ids],
+       pch = 19, col = "red")
+
 ```
 
