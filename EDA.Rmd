@@ -3,8 +3,10 @@ title: "EDA"
 author: "Anna Corcoran, Charlie Konen, Ethan Shang, Kethan Poduri, Daniel Cohen"
 date: "2025-11-29"
 output: pdf_document
+editor_options: 
+  markdown: 
+    wrap: 72
 ---
-
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
@@ -13,7 +15,6 @@ knitr::opts_chunk$set(
   echo = FALSE       # hide code if desired
 )
 ```
-
 
 ```{r}
 #| label: libraries
@@ -122,6 +123,7 @@ plot(gene_means, gene_sd,
      main = "Gene Mean vs SD",
      pch = 19, col = rgb(0,0,1,0.5))
 ```
+
 ```{r}
 brain %>%
   count(type) %>%
@@ -135,6 +137,7 @@ brain %>%
         axis.text.x = element_text(angle = 45, hjust = 1))
 
 ```
+
 ```{r}
 
 top5000 <- names(sort(gene_sd, decreasing = TRUE))[1:5000]
@@ -174,3 +177,166 @@ points(gene_means[top20_ids], gene_sd[top20_ids],
 
 ```
 
+```{r}
+library(glmnet) # for Lasso
+library(caret) # for stratified split + confusion matrix
+set.seed(325)
+```
+
+# Variable Selection
+
+Top 100 most variable genes based on SD
+
+```{r}
+top100_genes <- names(sort(gene_sd, decreasing = TRUE))[1:100]
+top100_genes
+```
+
+Design matrix of these high variable genes
+
+```{r}
+X <- as.matrix(brain[, top100_genes])
+y <- brain$type
+```
+
+Train/test data
+
+```{r}
+#| label: split-80-20
+set.seed(325)
+
+train_idx <- createDataPartition(y, p = 0.80, list = FALSE)
+
+X_train <- X[train_idx, ]
+X_test <- X[-train_idx, ]
+y_train <- y[train_idx]
+y_test <- y[-train_idx]
+```
+
+```{r}
+table(y) # overall
+table(y_train) # train
+table(y_test) # test
+```
+
+### K-fold lasso
+
+Choosing lambda:
+
+```{r}
+set.seed(325)
+K <- 10
+fold_id <- createFolds(y_train, k = K, list = FALSE) # stratified folds
+
+cv_fit <- cv.glmnet(
+x = X_train,
+y = y_train,
+family = "multinomial",
+alpha = 1, # Lasso
+type.measure = "class",
+foldid = fold_id
+)
+
+plot(cv_fit)
+```
+
+```{r}
+lambda_min  <- cv_fit$lambda.min
+lambda_1se  <- cv_fit$lambda.1se
+
+lambda_min
+lambda_1se
+```
+
+```{r}
+## ---- lasso-summary-fixed, message=FALSE, warning=FALSE -------------------
+
+# 1. Extract lambdas
+lambda_min <- cv_fit$lambda.min
+lambda_1se <- cv_fit$lambda.1se
+
+# 2. Non-zero coefficients at lambda_min
+coef_min <- coef(cv_fit, s = lambda_min)
+nonzero_min <- unique(unlist(
+  lapply(coef_min, function(m) rownames(m)[which(m != 0)])
+))
+nonzero_min <- setdiff(nonzero_min, "(Intercept)")
+
+# 3. Non-zero coefficients at lambda_1se
+coef_1se <- coef(cv_fit, s = lambda_1se)
+nonzero_1se <- unique(unlist(
+  lapply(coef_1se, function(m) rownames(m)[which(m != 0)])
+))
+nonzero_1se <- setdiff(nonzero_1se, "(Intercept)")
+
+# 4. Make sure response is a factor with no NAs
+y_test  <- factor(y_test)
+# (optional but good practice)
+y_train <- factor(y_train)
+stopifnot(!any(is.na(y_test)))
+
+# 5. Predictions at each lambda (ensure they are vectors)
+pred_min  <- predict(cv_fit, newx = X_test, s = lambda_min,  type = "class")
+pred_1se  <- predict(cv_fit, newx = X_test, s = lambda_1se, type = "class")
+
+pred_min  <- as.vector(pred_min)
+pred_1se  <- as.vector(pred_1se)
+
+# Align factor levels with the true response
+pred_min  <- factor(pred_min, levels = levels(y_test))
+pred_1se  <- factor(pred_1se, levels = levels(y_test))
+
+# Sanity check: any NAs in predictions?
+anyNA(pred_min)
+anyNA(pred_1se)
+
+# 6. Accuracies (robust to any accidental NA)
+acc_min <- mean(pred_min == y_test, na.rm = TRUE)
+acc_1se <- mean(pred_1se == y_test, na.rm = TRUE)
+
+# 7. Summary table
+summary_table <- data.frame(
+  Model              = c("Lasso (λ.min)", "Lasso (λ.1se)"),
+  Lambda             = c(lambda_min, lambda_1se),
+  Num_Selected_Genes = c(length(nonzero_min), length(nonzero_1se)),
+  Test_Accuracy      = c(acc_min, acc_1se)
+)
+
+summary_table
+```
+
+Using 10-fold cross-validation, the multinomial Lasso produced two
+candidate tuning parameters: $\lambda_{\text{min}}$, which corresponds
+to the value of $\lambda$ that achieved the lowest mean cross-validated
+error, and $\lambda_{\text{1se}}$, the largest value of $\lambda$ whose
+error is within one standard error of the minimum. In our analysis, the
+model fitted at $\lambda_{\text{min}}$ selected 37 genes, whereas the
+$\lambda_{\text{1se}}$ model selected 34 genes. Both models achieved
+perfect accuracy on the held-out test set.
+
+Even though the predictive performance is identical for this particular
+split, the $\lambda_{\text{1se}}$ model is generally preferred because
+it applies stronger regularization and results in a slightly more
+parsimonious set of predictors. In high-dimensional genomic settings,
+choosing $\lambda_{\text{1se}}$ reduces model variance and typically
+yields better stability and generalizability across different
+training–test partitions, even when the immediate test accuracy is the
+same.
+
+Genes selected from var selection
+
+```{r}
+## Genes selected at λ.1se
+lambda_1se <- cv_fit$lambda.1se
+
+coef_1se <- coef(cv_fit, s = lambda_1se)
+
+nonzero_1se <- unique(unlist(
+  lapply(coef_1se, function(m) rownames(m)[which(m != 0)])
+))
+
+# remove intercept
+nonzero_1se <- setdiff(nonzero_1se, "(Intercept)")
+
+nonzero_1se
+```
