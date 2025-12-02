@@ -183,20 +183,19 @@ library(caret) # for stratified split + confusion matrix
 set.seed(325)
 ```
 
-# Variable Selection
+# Variable Selection - Binary Case
 
-Top 100 most variable genes based on SD
-
-```{r}
-top100_genes <- names(sort(gene_sd, decreasing = TRUE))[1:100]
-top100_genes
-```
-
-Design matrix of these high variable genes
+Combine all different types of cancer into one cancer/not cancer binary
 
 ```{r}
-X <- as.matrix(brain[, top100_genes])
-y <- brain$type
+y_bin <- ifelse(brain$type == "normal", "non_cancer", "cancer")
+y_bin <- factor(y_bin, levels = c("non_cancer", "cancer"))
+
+table(y_bin)   # should show two classes now
+
+# Gene matrix (exclude non-gene columns)
+genes <- setdiff(names(brain), c("type", "samples"))
+X <- as.matrix(brain[, genes])
 ```
 
 Train/test data
@@ -205,138 +204,255 @@ Train/test data
 #| label: split-80-20
 set.seed(325)
 
-train_idx <- createDataPartition(y, p = 0.80, list = FALSE)
+train_idx <- createDataPartition(y_bin, p = 0.80, list = FALSE)
 
 X_train <- X[train_idx, ]
-X_test <- X[-train_idx, ]
-y_train <- y[train_idx]
-y_test <- y[-train_idx]
+X_test  <- X[-train_idx, ]
+y_train <- y_bin[train_idx]
+y_test  <- y_bin[-train_idx]
 ```
 
-```{r}
-table(y) # overall
-table(y_train) # train
-table(y_test) # test
-```
+### 3 - fold lasso
 
-### K-fold lasso
+-   3 fold because there are only 13 non-sample cancer (what the kaggle
+    dataset reccomended)
 
 Choosing lambda:
 
 ```{r}
 set.seed(325)
-K <- 10
-fold_id <- createFolds(y_train, k = K, list = FALSE) # stratified folds
+K <- 3
 
-cv_fit <- cv.glmnet(
-x = X_train,
-y = y_train,
-family = "multinomial",
-alpha = 1, # Lasso
-type.measure = "class",
-foldid = fold_id
+fold_id <- createFolds(y_train, k = K, list = FALSE)
+
+cv_fit_bin <- cv.glmnet(
+  x = X_train,
+  y = y_train,
+  family = "binomial",
+  alpha = 1,
+  type.measure = "class",
+  foldid = fold_id
 )
 
-plot(cv_fit)
-```
+plot(cv_fit_bin)
 
-```{r}
-lambda_min  <- cv_fit$lambda.min
-lambda_1se  <- cv_fit$lambda.1se
+lambda_min  <- cv_fit_bin$lambda.min
+lambda_1se  <- cv_fit_bin$lambda.1se
 
 lambda_min
 lambda_1se
 ```
 
+Extract selected genes / accuracy
+
 ```{r}
-## ---- lasso-summary-fixed, message=FALSE, warning=FALSE -------------------
-
-# 1. Extract lambdas
-lambda_min <- cv_fit$lambda.min
-lambda_1se <- cv_fit$lambda.1se
-
-# 2. Non-zero coefficients at lambda_min
-coef_min <- coef(cv_fit, s = lambda_min)
-nonzero_min <- unique(unlist(
-  lapply(coef_min, function(m) rownames(m)[which(m != 0)])
-))
+coef_min <- coef(cv_fit_bin, s = lambda_min)  # dgCMatrix
+nonzero_min <- rownames(coef_min)[which(coef_min[, 1] != 0)]
 nonzero_min <- setdiff(nonzero_min, "(Intercept)")
 
-# 3. Non-zero coefficients at lambda_1se
-coef_1se <- coef(cv_fit, s = lambda_1se)
-nonzero_1se <- unique(unlist(
-  lapply(coef_1se, function(m) rownames(m)[which(m != 0)])
-))
+coef_1se <- coef(cv_fit_bin, s = lambda_1se) # dgCMatrix
+nonzero_1se <- rownames(coef_1se)[which(coef_1se[, 1] != 0)]
 nonzero_1se <- setdiff(nonzero_1se, "(Intercept)")
 
-# 4. Make sure response is a factor with no NAs
-y_test  <- factor(y_test)
-# (optional but good practice)
-y_train <- factor(y_train)
-stopifnot(!any(is.na(y_test)))
+length(nonzero_min)
+length(nonzero_1se)
 
-# 5. Predictions at each lambda (ensure they are vectors)
-pred_min  <- predict(cv_fit, newx = X_test, s = lambda_min,  type = "class")
-pred_1se  <- predict(cv_fit, newx = X_test, s = lambda_1se, type = "class")
+# 3. Make sure response is a clean factor
+y_test  <- factor(y_test,  levels = c("non_cancer", "cancer"))
+# y_train only needed earlier; you can ensure it there
 
-pred_min  <- as.vector(pred_min)
-pred_1se  <- as.vector(pred_1se)
+# 4. Predictions at each lambda
+pred_min <- predict(
+  cv_fit_bin,
+  newx = X_test,
+  s = lambda_min,
+  type = "class"
+)
+pred_1se <- predict(
+  cv_fit_bin,
+  newx = X_test,
+  s = lambda_1se,
+  type = "class"
+)
 
-# Align factor levels with the true response
-pred_min  <- factor(pred_min, levels = levels(y_test))
-pred_1se  <- factor(pred_1se, levels = levels(y_test))
+pred_min  <- factor(as.vector(pred_min),  levels = levels(y_test))
+pred_1se  <- factor(as.vector(pred_1se), levels = levels(y_test))
 
-# Sanity check: any NAs in predictions?
-anyNA(pred_min)
-anyNA(pred_1se)
-
-# 6. Accuracies (robust to any accidental NA)
+# 5. Accuracies
 acc_min <- mean(pred_min == y_test, na.rm = TRUE)
 acc_1se <- mean(pred_1se == y_test, na.rm = TRUE)
 
-# 7. Summary table
-summary_table <- data.frame(
+# 6. Summary table
+summary_table_binary <- data.frame(
   Model              = c("Lasso (λ.min)", "Lasso (λ.1se)"),
   Lambda             = c(lambda_min, lambda_1se),
   Num_Selected_Genes = c(length(nonzero_min), length(nonzero_1se)),
   Test_Accuracy      = c(acc_min, acc_1se)
 )
 
-summary_table
+summary_table_binary
 ```
-
-Using 10-fold cross-validation, the multinomial Lasso produced two
-candidate tuning parameters: $\lambda_{\text{min}}$, which corresponds
-to the value of $\lambda$ that achieved the lowest mean cross-validated
-error, and $\lambda_{\text{1se}}$, the largest value of $\lambda$ whose
-error is within one standard error of the minimum. In our analysis, the
-model fitted at $\lambda_{\text{min}}$ selected 37 genes, whereas the
-$\lambda_{\text{1se}}$ model selected 34 genes. Both models achieved
-perfect accuracy on the held-out test set.
-
-Even though the predictive performance is identical for this particular
-split, the $\lambda_{\text{1se}}$ model is generally preferred because
-it applies stronger regularization and results in a slightly more
-parsimonious set of predictors. In high-dimensional genomic settings,
-choosing $\lambda_{\text{1se}}$ reduces model variance and typically
-yields better stability and generalizability across different
-training–test partitions, even when the immediate test accuracy is the
-same.
-
-Genes selected from var selection
 
 ```{r}
-## Genes selected at λ.1se
-lambda_1se <- cv_fit$lambda.1se
+genes_lasso_1se_binary <- nonzero_1se
+genes_lasso_1se_binary
+```
 
-coef_1se <- coef(cv_fit, s = lambda_1se)
+2 Strong genes, look at what they actually are:
 
-nonzero_1se <- unique(unlist(
-  lapply(coef_1se, function(m) rownames(m)[which(m != 0)])
-))
+```{r}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
 
-# remove intercept
+BiocManager::install("GEOquery")
+BiocManager::install("AnnotationDbi")
+BiocManager::install("hgu133plus2.db")
+```
+
+```{r}
+library(Biobase)
+library(GEOquery)
+library(AnnotationDbi)
+library(hgu133plus2.db)   # annotation package for HG-U133 Plus 2.0
+
+probes <- c("214145_s_at", "216073_at")  # your probe IDs
+
+annot <- select(hgu133plus2.db,
+               keys = probes,
+               columns = c("SYMBOL","ENTREZID","GENENAME"),
+               keytype = "PROBEID")
+
+print(annot)
+```
+
+Because pairwise gene–gene interactions (epistasis) can play an
+important role in tumor biology, we next asked whether the two genes
+selected by our initial Lasso model participate in meaningful
+interaction effects with other genes. Fitting all pairwise interactions
+among \~55,000 genes would require modeling billions of terms and is
+computationally infeasible, so we adopted a weak-hierarchy strategy
+centered on “anchor” genes. Specifically, we treated the two
+Lasso-selected probes (X214145_s_at and X216073_at) as anchors and
+constructed a high-dimensional design matrix that included all main
+effects for the \~55,000 genes, together with interaction terms between
+each anchor gene and every gene in the dataset (i.e., X214145_s_at×G_k
+and X216073_at×G_k for all k). We then fit a Lasso-penalized logistic
+regression model to this expanded feature set, allowing the penalty to
+select a sparse subset of main and interaction effects. This targeted
+interaction scan respects weak hierarchy, focuses on interactions
+involving genes already implicated by the main-effects model, and
+provides a computationally tractable way to screen for potential
+epistatic partners of the two anchor genes.
+
+```{r}
+genes_all <- setdiff(names(brain), c("type", "samples"))
+X_all <- as.matrix(brain[, genes_all])
+
+geneA <- "X214145_s_at"
+geneB <- "X216073_at"
+
+A <- X_all[, geneA]
+B <- X_all[, geneB]
+```
+
+```{r}
+set.seed(325)
+train_idx <- createDataPartition(y_bin, p = 0.80, list = FALSE)
+
+X_all_train <- X_all[train_idx, ]
+X_all_test  <- X_all[-train_idx, ]
+y_train <- y_bin[train_idx]
+y_test  <- y_bin[-train_idx]
+```
+
+```{r}
+## Interactions of A with all genes
+X_A_int_train <- X_all_train * A[train_idx]
+colnames(X_A_int_train) <- paste0(colnames(X_all_train), ":", geneA)
+
+## Interactions of B with all genes
+X_B_int_train <- X_all_train * B[train_idx]
+colnames(X_B_int_train) <- paste0(colnames(X_all_train), ":", geneB)
+
+## Design matrix: all main effects + all A×G + all B×G + explicit A, B
+X_design_train <- cbind(
+  X_all_train,
+  X_A_int_train,
+  X_B_int_train,
+  A_anchor = A[train_idx],
+  B_anchor = B[train_idx]
+)
+```
+
+```{r}
+X_A_int_test <- X_all_test * A[-train_idx]
+colnames(X_A_int_test) <- paste0(colnames(X_all_test), ":", geneA)
+
+X_B_int_test <- X_all_test * B[-train_idx]
+colnames(X_B_int_test) <- paste0(colnames(X_all_test), ":", geneB)
+
+X_design_test <- cbind(
+  X_all_test,
+  X_A_int_test,
+  X_B_int_test,
+  A_anchor = A[-train_idx],
+  B_anchor = B[-train_idx]
+)
+
+```
+
+```{r}
+set.seed(325)
+K <- 3   # safer than 10 given 13 normals
+
+fold_id <- createFolds(y_train, k = K, list = FALSE)
+
+cv_fit_int <- cv.glmnet(
+  x = X_design_train,
+  y = y_train,
+  family = "binomial",
+  alpha = 1,
+  type.measure = "class",
+  foldid = fold_id
+)
+
+plot(cv_fit_int)
+
+lambda_min_int <- cv_fit_int$lambda.min
+lambda_1se_int <- cv_fit_int$lambda.1se
+lambda_min_int
+lambda_1se_int
+```
+
+```{r}
+coef_int_1se <- coef(cv_fit_int, s = lambda_1se_int)
+
+nonzero_1se <- rownames(coef_int_1se)[which(coef_int_1se[, 1] != 0)]
 nonzero_1se <- setdiff(nonzero_1se, "(Intercept)")
 
-nonzero_1se
+# All selected interaction terms (contain ":")
+selected_interactions <- nonzero_1se[grepl(":", nonzero_1se)]
+selected_main_effects <- setdiff(nonzero_1se, selected_interactions)
+
+selected_interactions
+selected_main_effects
 ```
+
+Applying this interaction-augmented Lasso model revealed a focused set
+of epistatic candidates. Although the two anchor probes were selected
+based on their strong marginal association with cancer status, the
+interaction scan showed that only **X216073_at** exhibited evidence of
+meaningful combinatorial effects with other genes. Specifically, the
+model retained **seven interaction terms**, each representing an
+interaction between **X216073_at** and a distinct partner gene
+(X1554643_at, X1554771_at, X1556498_at, X1556881_at, X207284_s_at,
+X233423_at, and X236037_at). The absence of interaction terms involving
+X214145_s_at suggests its contribution to the phenotype is largely
+additive, whereas X216073_at may function as an interaction hub whose
+joint activity with multiple other genes enhances discrimination between
+cancer and normal samples. These retained interaction terms thus
+represent prioritized candidates for downstream biological
+interpretation and may point toward coordinated regulatory mechanisms
+underlying the cancer phenotype.
+
+# Binary Model Selection
