@@ -456,3 +456,165 @@ interpretation and may point toward coordinated regulatory mechanisms
 underlying the cancer phenotype.
 
 # Binary Model Selection
+
+# Multinomial Logistic Regression Model 
+Plan:
+Use the original 5-class type as the multiclass outcome.
+Restrict predictors to highly variable genes (HVG candidates) using SD (top 5,000).
+Fit a multinomial LASSO (glmnet, family = "multinomial") on those HVGs to select top predictive genes.
+From these, choose the top 100 genes (by coefficient magnitude).
+Refit a multinomial logistic regression model using only those 100 genes (again via glmnet) and evaluate on a held-out test set.
+
+##HVGs
+Setup multiclass response and HVG candidates
+```{r}
+# Multiclass outcome (5 tissue types)
+y_multi <- brain$type
+y_multi <- factor(y_multi)  # just to be safe
+
+# Gene matrix (same idea as before)
+genes_all <- setdiff(names(brain), c("type", "samples"))
+X_all <- as.matrix(brain[, genes_all])
+
+# Highly variable gene candidates: use SD across samples
+gene_sd_all <- apply(X_all, 2, sd, na.rm = TRUE)
+
+# Take top 5000 HVGs as candidate set (tune this if needed)
+top5000_hvgs <- names(sort(gene_sd_all, decreasing = TRUE))[1:5000]
+X_hvg <- X_all[, top5000_hvgs]
+```
+
+Train/test split by 5 class type
+```{r}
+set.seed(325)
+
+train_idx_multi <- createDataPartition(y_multi, p = 0.80, list = FALSE)
+
+X_train_hvg <- X_hvg[train_idx_multi, ]
+X_test_hvg  <- X_hvg[-train_idx_multi, ]
+y_train_multi <- y_multi[train_idx_multi]
+y_test_multi  <- y_multi[-train_idx_multi]
+```
+
+Multinomial LASSO to select predictive HVGs
+```{r}
+set.seed(325)
+K <- 3   # small n, so keep folds modest
+
+fold_id_multi <- createFolds(y_train_multi, k = K, list = FALSE)
+
+cv_fit_multi <- cv.glmnet(
+  x = X_train_hvg,
+  y = y_train_multi,
+  family = "multinomial",
+  alpha = 1,            # LASSO
+  type.measure = "class",
+  foldid = fold_id_multi
+)
+
+plot(cv_fit_multi)
+
+lambda_min_multi  <- cv_fit_multi$lambda.min
+lambda_1se_multi  <- cv_fit_multi$lambda.1se
+
+lambda_min_multi
+lambda_1se_multi
+```
+
+Pull out nonzero features, keep the top 100 by coefficient magnitude (HVG)
+```{r}
+# coef() for multinomial returns a list: one matrix per class
+coef_list_1se <- coef(cv_fit_multi, s = lambda_1se_multi)
+
+# All features with nonzero coefficient in at least one class
+nonzero_features <- unique(unlist(
+  lapply(coef_list_1se, function(m) {
+    rownames(m)[which(m[, 1] != 0)]
+  })
+))
+nonzero_features <- setdiff(nonzero_features, "(Intercept)")
+
+length(nonzero_features)  # how many genes are nonzero at λ.1se?
+
+# Rank features by maximum absolute coefficient across classes
+coef_abs <- sapply(nonzero_features, function(feat) {
+  max(sapply(coef_list_1se, function(m) {
+    # guard for any missing names
+    if (feat %in% rownames(m)) {
+      abs(m[feat, 1])
+    } else {
+      0
+    }
+  }))
+})
+
+# Sort decreasing and take top 100
+if (length(nonzero_features) > 100) {
+  top100_features <- names(sort(coef_abs, decreasing = TRUE))[1:100]
+} else {
+  top100_features <- nonzero_features
+}
+
+length(top100_features) #final top 100 HVGs with LASSO
+head(top100_features)
+
+```
+
+Fit multinomial logistic regression model with top 100 HVGs
+```{r}
+# Restrict train/test matrices to the 100 selected genes
+X_train_100 <- X_hvg[train_idx_multi, top100_features]
+X_test_100  <- X_hvg[-train_idx_multi, top100_features]
+
+set.seed(325)
+cv_fit_multi_100 <- cv.glmnet(
+  x = X_train_100,
+  y = y_train_multi,
+  family = "multinomial",
+  alpha = 1,
+  type.measure = "class"
+)
+
+lambda_min_multi_100 <- cv_fit_multi_100$lambda.min
+lambda_1se_multi_100 <- cv_fit_multi_100$lambda.1se
+
+lambda_min_multi_100
+lambda_1se_multi_100
+
+```
+
+Predictions and performance
+```{r}
+# Use λ.1se for a sparser, more stable model
+pred_multi <- predict(
+  cv_fit_multi_100,
+  newx = X_test_100,
+  s = lambda_1se_multi_100,
+  type = "class"
+)
+
+pred_multi <- factor(as.vector(pred_multi), levels = levels(y_train_multi))
+y_test_multi <- factor(y_test_multi, levels = levels(y_train_multi))
+
+conf_mat_multi <- confusionMatrix(pred_multi, y_test_multi)
+conf_mat_multi
+
+overall_acc_multi <- conf_mat_multi$overall["Accuracy"]
+overall_acc_multi
+
+multiclass_summary <- data.frame(
+  Lambda          = lambda_1se_multi_100,
+  Num_Selected    = length(top100_features),
+  Test_Accuracy   = overall_acc_multi
+)
+multiclass_summary
+
+```
+```{r}
+conf_mat_multi$table
+```
+Methodology:
+For subtype prediction, we first restricted attention to highly variable genes by computing the standard deviation of each probe across samples and retaining the top 5,000 most variable probes. Using these 5,000 HVGs as predictors and the five-class tissue label as the response (normal plus four tumor subtypes), we fit a LASSO-penalized multinomial logistic regression model via glmnet with 3-fold cross-validation. From the resulting model at the λ.1se penalty level, we ranked all nonzero features by the maximum absolute coefficient across classes and selected the top 100 probes as our final HVG feature set. We then refit a multinomial logistic regression model using only these 100 probes and evaluated predictive performance on a held-out test set using overall accuracy and the confusion matrix.
+
+Results:
+A sparse multinomial LASSO classifier using only 47 gene expression features achieved 95.8% test accuracy across five brain tissue types. Three tumor subtypes (ependymoma, medulloblastoma, and pilocytic astrocytoma) were classified with perfect sensitivity and specificity. The only misclassifications involved a single glioblastoma sample predicted as normal. This result demonstrates that a low-dimensional gene panel is sufficient for near-perfect discrimination among major pediatric and adult brain tumor classes.
