@@ -64,7 +64,7 @@ gene_summary <- data.frame(
   Min = gene_min,
   Max = gene_max
 )
-print(gene_summary)
+print(head(gene_summary))
 ```
 
 ```{r}
@@ -288,7 +288,7 @@ acc_1se <- mean(pred_1se == y_test, na.rm = TRUE)
 
 # 6. Summary table
 summary_table_binary <- data.frame(
-  Model              = c("Lasso (λ.min)", "Lasso (λ.1se)"),
+  Model              = c("Lasso (lambda.min)", "Lasso (lambda.1se)"),
   Lambda             = c(lambda_min, lambda_1se),
   Num_Selected_Genes = c(length(nonzero_min), length(nonzero_1se)),
   Test_Accuracy      = c(acc_min, acc_1se)
@@ -538,7 +538,7 @@ nonzero_features <- unique(unlist(
 ))
 nonzero_features <- setdiff(nonzero_features, "(Intercept)")
 
-length(nonzero_features)  # how many genes are nonzero at λ.1se?
+length(nonzero_features)  # how many genes are nonzero at lambda.1se?
 
 # Rank features by maximum absolute coefficient across classes
 coef_abs <- sapply(nonzero_features, function(feat) {
@@ -589,7 +589,7 @@ lambda_1se_multi_100
 
 Predictions and performance
 ```{r}
-# Use λ.1se for a sparser, more stable model
+# Use lambda.1se for a sparser, more stable model
 pred_multi <- predict(
   cv_fit_multi_100,
   newx = X_test_100,
@@ -618,7 +618,7 @@ multiclass_summary
 conf_mat_multi$table
 ```
 Methodology:
-For subtype prediction, we first restricted attention to highly variable genes by computing the standard deviation of each probe across samples and retaining the top 5,000 most variable probes. Using these 5,000 HVGs as predictors and the five-class tissue label as the response (normal plus four tumor subtypes), we fit a LASSO-penalized multinomial logistic regression model via glmnet with 3-fold cross-validation. From the resulting model at the λ.1se penalty level, we ranked all nonzero features by the maximum absolute coefficient across classes and selected the top 100 probes as our final HVG feature set. We then refit a multinomial logistic regression model using only these 100 probes and evaluated predictive performance on a held-out test set using overall accuracy and the confusion matrix.
+For subtype prediction, we first restricted attention to highly variable genes by computing the standard deviation of each probe across samples and retaining the top 5,000 most variable probes. Using these 5,000 HVGs as predictors and the five-class tissue label as the response (normal plus four tumor subtypes), we fit a LASSO-penalized multinomial logistic regression model via glmnet with 3-fold cross-validation. From the resulting model at the $\lambda.1se$ penalty level, we ranked all nonzero features by the maximum absolute coefficient across classes and selected the top 100 probes as our final HVG feature set. We then refit a multinomial logistic regression model using only these 100 probes and evaluated predictive performance on a held-out test set using overall accuracy and the confusion matrix.
 
 Results:
 A sparse multinomial LASSO classifier using only 47 gene expression features achieved 95.8% test accuracy across five brain tissue types. Three tumor subtypes (ependymoma, medulloblastoma, and pilocytic astrocytoma) were classified with perfect sensitivity and specificity. The only misclassifications involved a single glioblastoma sample predicted as normal. This result demonstrates that a low-dimensional gene panel is sufficient for near-perfect discrimination among major pediatric and adult brain tumor classes.
