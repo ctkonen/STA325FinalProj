@@ -1,7 +1,7 @@
 ---
-title: "EDA"
+title: "Predicting Brain Cancer By Gene Expression"
 author: "Anna Corcoran, Charlie Konen, Ethan Shang, Kethan Poduri, Daniel Cohen"
-date: "2025-11-29"
+date: "2025-12-15"
 output: pdf_document
 editor_options: 
   markdown: 
@@ -30,6 +30,10 @@ library(tidyverse)
 brain <- readRDS("data/brain.rds")
 
 ```
+
+## Introduction
+Brain cancer is extremely deadly, with a combined estimated 18,330 deaths in the United States in 2025 alone (SEER). Only 40% of adults diagnosed with a malignant brain tumor live for over a year, and less than 20% live for more than 5 years (Penfold). This project covers four types of brain cancer: ependymoma, glioblastoma, medulloblastoma, and pilocytic astrocytoma, with varying severity. Pilocytic astrocytoma is nearly always treatable, with a 96% 5-year survival rate (mayo). Glioblastoma, on the other hand, is incredibly deadly, with a median 5-year survival rate of only 5.6% in adults (ABTA), while medulloblastoma has a median 5-year survival rate of 80.6% (cancer.gov) and ependymoma of nearly 85% (cleveland clinic), making them relatively treatable. Early diagnosis is difficult due to nonspecific symptoms like headaches, weakness, confusion, and memory loss (Penfold) and requires a neurological exam; CT scan, brain MRI and/or PET scan to locate a mass;  and then a brain biopsy and testing of the biopsy in lab to determine if the cells are cancerous (mayo 2). This is lengthy and expensive, delaying accurate prognoses. Brain biopsies are also invasive, requiring a hole to be drilled into the skull and a needle to be inserted into the hole (mayo 2). The goal of this project is to create a model that can accurately predict the state of a sample based on gene expression. This could then be used on circulating tumor DNA (ctDNA), which is cell-free DNA found in the bloodstream, to obtain accurate diagnoses earlier in progression without the invasion of a tumor biopsy (Kim). Early and accurate diagnoses can streamline treatment, getting patients into appropriate clinical trials and improving survival rates. 
+
 
 ```{r}
 #| label: EDA
@@ -618,3 +622,14 @@ For subtype prediction, we first restricted attention to highly variable genes b
 
 Results:
 A sparse multinomial LASSO classifier using only 47 gene expression features achieved 95.8% test accuracy across five brain tissue types. Three tumor subtypes (ependymoma, medulloblastoma, and pilocytic astrocytoma) were classified with perfect sensitivity and specificity. The only misclassifications involved a single glioblastoma sample predicted as normal. This result demonstrates that a low-dimensional gene panel is sufficient for near-perfect discrimination among major pediatric and adult brain tumor classes.
+
+References:
+https://seer.cancer.gov/statfacts/html/brain.html 
+Penfold C, Joannides AJ, Bell J, Walter FM. Diagnosing adult primary brain tumours: can we do better? Br J Gen Pract. 2017 Jun;67(659):278-279. doi: 10.3399/bjgp17X691277. PMID: 28546414; PMCID: PMC5442949.
+https://www.mayoclinic.org/diseases-conditions/astrocytoma/survival-rates/gnc-20591685
+https://www.abta.org/tumor_types/glioblastoma-gbm/#:~:text=Prognosis,ages%2040+):%205.6%25*
+https://www.cancer.gov/rare-brain-spine-tumor/tumors/medulloblastoma
+https://my.clevelandclinic.org/health/diseases/23147-ependymoma
+https://www.mayoclinic.org/diseases-conditions/brain-tumor/diagnosis-treatment/drc-20350088
+Kim H, Park KU. Clinical Circulating Tumor DNA Testing for Precision Oncology. Cancer Res Treat. 2023 Apr;55(2):351-366. doi: 10.4143/crt.2022.1026. PMID: 36915242; PMCID: PMC10101787. 
+
