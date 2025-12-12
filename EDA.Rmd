@@ -459,9 +459,7 @@ represent prioritized candidates for downstream biological
 interpretation and may point toward coordinated regulatory mechanisms
 underlying the cancer phenotype.
 
-# Binary Model Selection
-
-# Multinomial Logistic Regression Model 
+# Multinomial Logistic Regression Model (Main Effects)
 Plan:
 Use the original 5-class type as the multiclass outcome.
 Restrict predictors to highly variable genes (HVG candidates) using SD (top 5,000).
@@ -622,6 +620,192 @@ For subtype prediction, we first restricted attention to highly variable genes b
 
 Results:
 A sparse multinomial LASSO classifier using only 47 gene expression features achieved 95.8% test accuracy across five brain tissue types. Three tumor subtypes (ependymoma, medulloblastoma, and pilocytic astrocytoma) were classified with perfect sensitivity and specificity. The only misclassifications involved a single glioblastoma sample predicted as normal. This result demonstrates that a low-dimensional gene panel is sufficient for near-perfect discrimination among major pediatric and adult brain tumor classes.
+
+# Multinomial Logistic Regression Model (With Interactions)
+
+Plan:
+
+Hierarchical / screened interaction strategy:
+Start with top HVGs by SD
+Use multinomial LASSO (main effects) to identify small anchor set of strong genes.
+Create interaction terms only between anchor genes and all HVGs.
+Fit a multinomial LASSO on:
+main effects + anchor × gene interactions.
+Use LASSO to determine significant interactions
+
+Outcome and HVG Candidates
+```{r}
+# Multiclass response
+y_multi <- factor(brain$type)
+
+# Gene matrix
+genes_all <- setdiff(names(brain), c("type", "samples"))
+X_all <- as.matrix(brain[, genes_all])
+
+# HVGs by SD
+gene_sd_all <- apply(X_all, 2, sd, na.rm = TRUE)
+top5000_hvgs <- names(sort(gene_sd_all, decreasing = TRUE))[1:5000]
+X_hvg <- X_all[, top5000_hvgs]
+```
+
+Train/test split
+```{r}
+set.seed(325)
+train_idx <- createDataPartition(y_multi, p = 0.80, list = FALSE)
+
+X_train_hvg <- X_hvg[train_idx, ]
+X_test_hvg  <- X_hvg[-train_idx, ]
+y_train     <- y_multi[train_idx]
+y_test      <- y_multi[-train_idx]
+
+```
+
+Multiclass Main Effects LASSO to determine anchor genes
+```{r}
+fold_id <- createFolds(y_train, k = 3, list = FALSE)
+
+cv_main <- cv.glmnet(
+  x = X_train_hvg,
+  y = y_train,
+  family = "multinomial",
+  alpha = 1,
+  type.measure = "class",
+  foldid = fold_id
+)
+
+lambda_anchor <- cv_main$lambda.1se
+```
+
+Extract Anchor genes
+```{r}
+coef_main <- coef(cv_main, s = lambda_anchor)
+
+anchor_genes <- unique(unlist(
+  lapply(coef_main, function(m) {
+    rownames(m)[which(m[,1] != 0)]
+  })
+))
+anchor_genes <- setdiff(anchor_genes, "(Intercept)")
+
+length(anchor_genes)
+anchor_genes
+
+```
+
+
+Construct training interaction terms 
+```{r}
+# Main effects
+X_main_train <- X_train_hvg
+
+# Interaction terms
+X_int_train <- do.call(
+  cbind,
+  lapply(anchor_genes, function(g) {
+    mat <- X_train_hvg * X_train_hvg[, g]
+    colnames(mat) <- paste0(colnames(X_train_hvg), ":", g)
+    mat
+  })
+)
+
+# Combined design matrix
+X_design_train <- cbind(X_main_train, X_int_train)
+
+```
+
+Construct testing interaction terms
+```{r}
+X_main_test <- X_test_hvg
+
+X_int_test <- do.call(
+  cbind,
+  lapply(anchor_genes, function(g) {
+    mat <- X_test_hvg * X_test_hvg[, g]
+    colnames(mat) <- paste0(colnames(X_test_hvg), ":", g)
+    mat
+  })
+)
+
+X_design_test <- cbind(X_main_test, X_int_test)
+
+```
+
+Multinomial lasso with interactions
+```{r}
+set.seed(325)
+cv_int_multi <- cv.glmnet(
+  x = X_design_train,
+  y = y_train,
+  family = "multinomial",
+  alpha = 1,
+  type.measure = "class",
+  foldid = fold_id
+)
+
+plot(cv_int_multi)
+
+lambda_int <- cv_int_multi$lambda.1se
+```
+
+Extract selected main effects vs interactions
+```{r}
+coef_int <- coef(cv_int_multi, s = lambda_int)
+
+nonzero_terms <- unique(unlist(
+  lapply(coef_int, function(m) {
+    rownames(m)[which(m[,1] != 0)]
+  })
+))
+nonzero_terms <- setdiff(nonzero_terms, "(Intercept)")
+
+selected_interactions <- nonzero_terms[grepl(":", nonzero_terms)]
+selected_main_effects <- setdiff(nonzero_terms, selected_interactions)
+
+length(selected_main_effects)
+length(selected_interactions)
+
+selected_interactions[1:10]
+
+```
+Prediction and evaluaion
+```{r}
+pred_int <- predict(
+  cv_int_multi,
+  newx = X_design_test,
+  s = lambda_int,
+  type = "class"
+)
+
+pred_int <- factor(as.vector(pred_int), levels = levels(y_train))
+y_test   <- factor(y_test, levels = levels(y_train))
+
+conf_mat_int <- confusionMatrix(pred_int, y_test)
+conf_mat_int
+
+```
+
+```{r}
+interaction_summary <- data.frame(
+  Lambda = lambda_int,
+  Num_Main_Effects = length(selected_main_effects),
+  Num_Interactions = length(selected_interactions),
+  Test_Accuracy = conf_mat_int$overall["Accuracy"]
+)
+
+interaction_summary
+
+```
+```{r}
+head(selected_interactions, 10)
+```
+
+
+
+Methodology:
+To assess whether gene–gene interactions improve subtype discrimination, we extended the HVG-based multinomial LASSO framework to include interaction effects. Using the previously fit main-effects model, we identified a sparse set of anchor genes with strong subtype associations. Interaction terms were then constructed between each anchor gene and all highly variable genes, yielding a structured interaction feature set that avoids the combinatorial burden of modeling all pairwise interactions. A LASSO-penalized multinomial logistic regression model was fit to this expanded design matrix using 3-fold cross-validation, allowing simultaneous selection of informative main and interaction effects. Predictive performance was evaluated on a held-out test set and compared directly to the main-effects model.
+
+Results:
+Extending the multinomial classifier to include gene–gene interaction terms yielded identical predictive performance (95.8% test accuracy) compared to the main-effects model. Notably, the interaction-augmented LASSO retained 57 interaction terms and zero main-effect terms, indicating that subtype discrimination was driven entirely by combinatorial gene expression patterns rather than marginal gene effects. This result suggests that epistatic relationships among highly variable genes capture subtype-specific structure that is redundant with, but not superior to, marginal gene effects in terms of classification accuracy.
 
 # Support Vector Machine
 Plan:
