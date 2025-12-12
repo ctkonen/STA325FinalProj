@@ -623,6 +623,75 @@ For subtype prediction, we first restricted attention to highly variable genes b
 Results:
 A sparse multinomial LASSO classifier using only 47 gene expression features achieved 95.8% test accuracy across five brain tissue types. Three tumor subtypes (ependymoma, medulloblastoma, and pilocytic astrocytoma) were classified with perfect sensitivity and specificity. The only misclassifications involved a single glioblastoma sample predicted as normal. This result demonstrates that a low-dimensional gene panel is sufficient for near-perfect discrimination among major pediatric and adult brain tumor classes.
 
+# Support Vector Machine
+Plan:
+We will use the top 100 discriminatory genes identified by the Multinomial Lasso model as inputs for a Support Vector Machine (SVM).
+We will use a Linear Kernel, which is generally effective for high-dimensional gene expression data where the number of features is large relative to the number of samples.
+We will use 3-fold cross-validation to tune the cost parameter ($C$) and evaluate the model on the held-out test set.
+
+```{r}
+#| label: svm-training
+#| 
+library(kernlab) # Required for svmLinear in caret
+
+# 1. Prepare Data
+# We use the same Top 100 features from the Lasso step to ensure fair comparison
+# and valid feature selection.
+X_train_svm <- X_train_100
+y_train_svm <- y_train_multi
+
+X_test_svm <- X_test_100
+y_test_svm <- y_test_multi
+
+# 2. Setup Cross-Validation
+set.seed(325)
+train_control <- trainControl(
+  method = "cv",
+  number = 3,       # 3-fold CV (consistent with previous models)
+  classProbs = TRUE # Compute probabilities for ROC/AUC if needed later
+)
+
+# 3. Tuning Grid for Cost (C)
+grid <- expand.grid(C = c(0.01, 0.1, 1, 10, 100))
+
+# 4. Train SVM (Linear Kernel)
+svm_fit <- caret::train(
+  x = X_train_svm,
+  y = y_train_svm,
+  method = "svmLinear",
+  trControl = train_control,
+  tuneGrid = grid,
+  preProcess = c("center", "scale") # SVMs are sensitive to scale
+)
+print(svm_fit)
+```
+
+```{r}
+pred_svm <- predict(svm_fit, newdata = X_test_svm)
+
+# 2. Confusion Matrix
+conf_mat_svm <- confusionMatrix(pred_svm, y_test_svm)
+conf_mat_svm
+
+# 3. Extract Accuracy
+svm_acc <- conf_mat_svm$overall["Accuracy"]
+svm_acc
+
+# 4. Compare Models
+comparison_table <- data.frame(
+  Model = c("Multinomial Lasso", "SVM (Linear)"),
+  Features_Used = c("Top 100 HVGs", "Top 100 HVGs"),
+  Test_Accuracy = c(overall_acc_multi, svm_acc)
+)
+
+knitr::kable(comparison_table, caption = "Model Comparison: Multiclass Classification")
+```
+Methodology: To assess if a margin-based classifier could outperform the probabilistic Lasso model, we trained a multiclass Support Vector Machine (SVM) with a linear kernel. We utilized the reduced feature set of the top 100 genes selected by the previous multinomial Lasso step to minimize overfitting and maintain dimensionality reduction. The model was trained using the caret framework with 3-fold cross-validation to optimize the cost parameter ($C$), which controls the penalty for misclassified points. Data was centered and scaled prior to training, as SVMs are distance-based and sensitive to variable magnitudes.
+
+Results: The SVM model selected an optimal cost parameter of $C = 0.1$ (check output). On the independent test set, the SVM achieved an accuracy of `r round(svm_acc * 100, 1)%`, indicating a worse performance relative to the Multinomial Lasso model. The confusion matrix indicates that the model was able to separate distinct tumor types with high precision, but struggled with the glioblastoma class. 
+
+
+
 References:
 https://seer.cancer.gov/statfacts/html/brain.html 
 Penfold C, Joannides AJ, Bell J, Walter FM. Diagnosing adult primary brain tumours: can we do better? Br J Gen Pract. 2017 Jun;67(659):278-279. doi: 10.3399/bjgp17X691277. PMID: 28546414; PMCID: PMC5442949.
