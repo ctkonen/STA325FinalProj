@@ -344,6 +344,8 @@ library(AnnotationDbi)
 library(hgu133plus2.db)   # annotation package for HG-U133 Plus 2.0
 
 probes <- c("214145_s_at", "216073_at")  # your probe IDs
+probes <- c("223229_at", "206026_s_at", "242794_at", "1562309_s_at")
+probes <- c("244675_at", "216073_at")
 
 annot <- select(hgu133plus2.db,
                keys = probes,
